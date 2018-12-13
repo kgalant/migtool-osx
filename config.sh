@@ -1,1 +1,0 @@
-/Users/kim.galant/dev/tools/config.sh
