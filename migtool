@@ -1,0 +1,132 @@
+#!/bin/bash
+
+MYDIR="$(dirname $0)"
+DEFPACKAGEFILE=package.zip
+PWDIR="$(pwd)"
+
+source $MYDIR/config.sh
+
+print_usage()
+{
+	echo "usage: migtool retrieve <propertyfile> [<packagefile.xml>] [<outputfilename>]"
+	echo "usage: migtool deploy <propertyfile> [<directoryname>] [checkonly|d] ["testclass1,testclass2"]" 
+}
+
+#check if a known command is called
+
+if [ -z "$1" ]; then
+        print_usage;
+        exit;
+fi
+
+if [ "$1" != "retrieve" ] && [  "$1" != "deploy" ]; then
+	print_usage;
+	exit;
+fi
+
+# check if we got a property file as a second parameter
+
+if [ -e "$2" ]; then
+	PROPFILE=$2
+elif [ -e "$PROPDIR/$2.properties" ]; then
+	PROPFILE=$PROPDIR/$2.properties
+else
+	echo Couldnt find property file $2 or locate a $PROPDIR/$2.properties file, aborting...
+	print_usage;
+	exit;
+fi
+
+# now go off and do stuff
+
+#echo 1: $1
+#echo 2: $2
+#echo 3: $3
+#echo PROPFILE: $PROPFILE
+
+
+
+if [ ! -z "$PROPFILE" ]; then
+	# retrieve
+	if [ "$1" = "retrieve" ]; then
+		# check what to fetch
+		if [ -z "$3" ]; then
+			if [ -e "./package.xml" ]; then
+				FETCHFILE=./package.xml
+			else
+				echo No package.xml given as 3rd parameter and no package.xml file found in current directory. Cannot continue.
+				print_usage
+				exit
+			fi
+		else
+			FETCHFILE=$3
+		fi
+		#check where to put it
+		if [ -z "$4" ]; then
+			OUTPUTFILE=package.zip
+		else
+			OUTPUTFILE=$4
+		fi
+		# do fetch if we know what to do
+		if [ ! -z "$FETCHFILE" ]; then
+			echo Retrieving $FETCHFILE using $PROPFILE into $OUTPUTFILE
+			ant -f $MYDIR/build.xml -propertyfile $PROPFILE -Dpackagefile=$FETCHFILE -Ddirname=$(pwd) retrieveUnpackaged
+			# find newest file matching retrieve* and rename it
+			RETRIEVEDFILE="$(find ./retrieve* | sort -r | head -n 1)"
+			mv $RETRIEVEDFILE $OUTPUTFILE
+		fi
+	fi
+	# deploy
+	if [ "$1" = "deploy" ]; then
+		# check for what to deploy
+		if [ -z "$3" ]; then
+			if [ -e "$PWDIR/$DEFPACKAGEFILE" ]; then
+				# default package file found in current directory
+				echo Nothing provided to deploy, but $DEFPACKAGEFILE found, will deploy that
+				FETCHFILE=$PWDIR/$DEFPACKAGEFILE
+				BLDTARGET=deployZip
+				DEPLOYTARGET=-Dfilename=$FETCHFILE
+			elif [ -e "$PWDIR/package.xml" ]; then
+				# package.xml file found in current directory, assume that it's the root of an unzipped package
+				echo Nothing provided to deploy, $PWDIR/$DEFPACKAGEFILE was not found, but found $PWDIR/package.xml, will deploy that
+				SET FETCHFILE=$PWDIR
+				SET BLDTARGET=deployDir
+				SET DEPLOYTARGET=-DdeployRoot=$FETCHFILE
+			fi
+		else
+			FETCHFILE=$3
+			if [ -d "$3" ]; then
+				# deploy parameter provided, and it's a directory
+				BLDTARGET=deployDir
+				DEPLOYTARGET=-DdeployRoot=$FETCHFILE
+			elif [ -e "$3" ]; then
+				# deploy parameter provided, and it exists - assume file
+				BLDTARGET=deployZip
+				DEPLOYTARGET=-Dfilename=$FETCHFILE
+			else
+				echo asked to deploy $3 but cannot locate it...
+			fi
+		fi
+
+		# check for validation parameter
+
+		if [ "$4" = "checkonly" ]; then
+			CHECKONLYSTRING=-DcheckOnly=true
+		fi
+		# now do your thing
+		BUILDXML=build.xml
+		echo Asked to deploy $FETCHFILE using $PROPFILE $CHECKONLYSTRING
+
+		# check if we need to modify the build.xml to add specific test classes
+
+		if [ -n "$5" ]; then
+			echo Asked to run tests selectively: $5
+			echo Customizing build.xml
+			BUILDXML=build-output.xml
+			java -jar $SAXON -s:$MYDIR/build.xml -xsl:$MYDIR/addtests.xsl -o:$MYDIR/$BUILDXML testclasses=$5 bldtarget=$BLDTARGET	
+		fi
+		echo ant -f $MYDIR/$BUILDXML -propertyfile $PROPFILE $DEPLOYTARGET $BLDTARGET $CHECKONLYSTRING
+		ant -f $MYDIR/$BUILDXML -propertyfile $PROPFILE $DEPLOYTARGET $BLDTARGET $CHECKONLYSTRING
+	fi	
+fi
+
+
